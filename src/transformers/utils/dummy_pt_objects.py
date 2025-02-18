@@ -2197,7 +2197,33 @@ class ClvpPreTrainedModel(metaclass=DummyObject):
     def __init__(self, *args, **kwargs):
         requires_backends(self, ["torch"])
 
+class CMoEForCausalLM(metaclass=DummyObject):
+    _backends = ["torch"]
 
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class CMoEForSequenceClassification(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class CMoEModel(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class CMoEPreTrainedModel(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+        
 class CodeGenForCausalLM(metaclass=DummyObject):
     _backends = ["torch"]
 

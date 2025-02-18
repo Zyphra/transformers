@@ -301,6 +301,7 @@ _import_structure = {
         "ClvpProcessor",
         "ClvpTokenizer",
     ],
+    "models.cmoe": ["CMoEConfig"],
     "models.code_llama": [],
     "models.codegen": [
         "CodeGenConfig",
@@ -1839,6 +1840,14 @@ else:
             "ClvpModel",
             "ClvpModelForConditionalGeneration",
             "ClvpPreTrainedModel",
+        ]
+    )
+    _import_structure["models.cmoe"].extend(
+        [
+            "CMoEForCausalLM",
+            "CMoEForSequenceClassification",
+            "CMoEModel",
+            "CMoEPreTrainedModel",
         ]
     )
     _import_structure["models.codegen"].extend(
@@ -5399,6 +5408,7 @@ if TYPE_CHECKING:
         ClvpProcessor,
         ClvpTokenizer,
     )
+    from .models.cmoe import CMoEConfig
     from .models.codegen import (
         CodeGenConfig,
         CodeGenTokenizer,
@@ -6921,6 +6931,12 @@ if TYPE_CHECKING:
             ClvpModel,
             ClvpModelForConditionalGeneration,
             ClvpPreTrainedModel,
+        )
+        from .models.cmoe import (
+            CMoEForCausalLM,
+            CMoEForSequenceClassification,
+            CMoEModel,
+            CMoEPreTrainedModel,
         )
         from .models.codegen import (
             CodeGenForCausalLM,

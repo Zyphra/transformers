@@ -50,6 +50,7 @@ from . import (
     clip,
     clipseg,
     clvp,
+    cmoe,
     code_llama,
     codegen,
     cohere,

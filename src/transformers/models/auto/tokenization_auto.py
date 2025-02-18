@@ -145,6 +145,7 @@ else:
                     "CodeLlamaTokenizerFast" if is_tokenizers_available() else None,
                 ),
             ),
+            ("cmoe", ("LlamaTokenizer", "LlamaTokenizerFast" if is_tokenizers_available() else None)),
             ("codegen", ("CodeGenTokenizer", "CodeGenTokenizerFast" if is_tokenizers_available() else None)),
             ("cohere", (None, "CohereTokenizerFast" if is_tokenizers_available() else None)),
             ("cohere2", (None, "CohereTokenizerFast" if is_tokenizers_available() else None)),
