@@ -388,6 +388,7 @@ if TYPE_CHECKING:
     from .yoso import *
     from .zamba import *
     from .zamba2 import *
+    from .zaya import *
     from .zoedepth import *
 else:
     import sys
