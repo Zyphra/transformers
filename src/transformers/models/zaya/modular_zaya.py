@@ -235,11 +235,11 @@ class ZayaDynamicCache(DynamicCache):
         self.batch_size = batch_size
         self.dtype = dtype
         self.device = device
-        num_k_heads = config.num_query_groups_list[0]
-        num_q_heads = config.cca_num_q_heads[0]
+        num_k_heads = config.num_query_groups
+        num_q_heads = config.cca_num_q_heads
         head_dim = 128
         self.conv_kernel_size = 2
-        self.num_layers = len(config.zaya_layers)
+        self.num_layers = config.num_hidden_layers
         self.latent_k_dim = num_k_heads * head_dim
         self.latent_q_dim = num_q_heads * head_dim
         self.in_out_ch = self.latent_k_dim + self.latent_q_dim
@@ -547,8 +547,8 @@ class ZayaAttention(nn.Module):
         )  # hardcoded query compression for now
         self.qkv = CCA(
             config=self.config,
-            cca_num_q_heads=self.config.cca_num_q_heads[layer_n],
-            cca_num_kv_heads=self.config.num_query_groups_list[layer_n],
+            cca_num_q_heads=self.config.cca_num_q_heads,
+            cca_num_kv_heads=self.config.num_query_groups,
             cca_num_heads=self.num_heads,
             hidden_size=self.hidden_size,
             layer_number=layer_n,
@@ -1092,7 +1092,7 @@ class ZayaRouter(nn.Module):
             and (self.layer_number != zaya_first_layer)
         )
 
-        ln_eps = float(getattr(config, "layernorm_epsilon", 1e-6))
+        ln_eps = float(getattr(config, "norm_epsilon", 1e-5))
         self.rmsnorm_eda = ZayaRMSNorm(self.mlp_expansion, eps=ln_eps)
         if self.use_eda:
             # eda
@@ -1656,15 +1656,16 @@ class ZayaModel(ZayaPreTrainedModel):
         )
         self.layers = []
         first_mlp_layer = True
+        self._tied_weights_keys = []
 
-        for layer_n in range(len(config.zaya_layers)):
-            if isinstance(config.zaya_layers[layer_n], int):
+        for layer_n in range(config.num_hidden_layers):
+            if layer_n % 2 == 1:
                 self.layers.append(
                     ZayaDecoderMLPLayer(
                         config,
-                        config.zaya_layers[layer_n],
-                        config.zaya_mlp_expansion[layer_n],
-                        config.ffn_hidden_size_list[layer_n],
+                        config.num_experts,
+                        config.zaya_mlp_expansion,
+                        config.ffn_hidden_size,
                         first_mlp_layer,
                         layer_n,
                         self.training,
@@ -1680,7 +1681,7 @@ class ZayaModel(ZayaPreTrainedModel):
         self.gradient_checkpointing = False
 
         if self.config.scale_residual_merge:
-            self.res_scale = ResidualScaling(config, len(config.zaya_layers))
+            self.res_scale = ResidualScaling(config, config.num_hidden_layers)
 
         self.final_norm = ZayaRMSNorm(
             self.config.hidden_size, eps=self.config.norm_epsilon
@@ -2047,6 +2048,7 @@ class ZayaForCausalLM(ZayaPreTrainedModel, GenerationMixin):
         super().__init__(config, **kwargs)
         self.config = config
         self.model = ZayaModel(config)
+        self._tied_weights_keys = ["lm_head.weight", *self.model._tied_weights_keys]
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(
             config.hidden_size,

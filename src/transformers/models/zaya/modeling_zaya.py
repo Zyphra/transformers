@@ -200,11 +200,11 @@ class ZayaDynamicCache(DynamicCache):
         self.batch_size = batch_size
         self.dtype = dtype
         self.device = device
-        num_k_heads = config.num_query_groups_list[0]
-        num_q_heads = config.cca_num_q_heads[0]
+        num_k_heads = config.num_query_groups
+        num_q_heads = config.cca_num_q_heads
         head_dim = 128
         self.conv_kernel_size = 2
-        self.num_layers = len(config.zaya_layers)
+        self.num_layers = config.num_hidden_layers
         self.latent_k_dim = num_k_heads * head_dim
         self.latent_q_dim = num_q_heads * head_dim
         self.in_out_ch = self.latent_k_dim + self.latent_q_dim
@@ -506,8 +506,8 @@ class ZayaAttention(nn.Module):
         )  # hardcoded query compression for now
         self.qkv = CCA(
             config=self.config,
-            cca_num_q_heads=self.config.cca_num_q_heads[layer_n],
-            cca_num_kv_heads=self.config.num_query_groups_list[layer_n],
+            cca_num_q_heads=self.config.cca_num_q_heads,
+            cca_num_kv_heads=self.config.num_query_groups,
             cca_num_heads=self.num_heads,
             hidden_size=self.hidden_size,
             layer_number=layer_n,
@@ -528,6 +528,7 @@ class ZayaAttention(nn.Module):
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
+
         batch_size, seq_length, _ = hidden_states.shape
         query_states, key_states, value_states = self.qkv(hidden_states, past_key_values, cca_mask)
         query_states = query_states.view(batch_size, seq_length, self.config.num_attention_heads // 2, self.head_dim)
@@ -601,6 +602,7 @@ class ZayaSdpaAttention(ZayaAttention):
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
+
         if output_attentions:
             # TODO: Improve this warning with e.g.
             # `model.config.attn_implementation = "manual"` once this is
@@ -695,6 +697,7 @@ class ZayaFlashAttention2(ZayaAttention):
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     ):
+
         if output_attentions:
             # TODO: Improve this warning with e.g.
             # `model.config.attn_implementation = "manual"` once this is
@@ -787,6 +790,7 @@ Zaya_ATTENTION_CLASSES = {
 
 class ZayaDecoderATTLayer(nn.Module):
     def __init__(self, config: ZayaConfig, layer_n: int, training: bool):
+
         super().__init__()
         self.debug_level = 2
         self.config = config
@@ -941,7 +945,7 @@ class ZayaRouter(nn.Module):
         use_eda_cfg = bool(getattr(config, "zaya_use_eda", False))
         self.use_eda = use_eda_cfg and (zaya_first_layer is not None) and (self.layer_number != zaya_first_layer)
 
-        ln_eps = float(getattr(config, "layernorm_epsilon", 1e-6))
+        ln_eps = float(getattr(config, "norm_epsilon", 1e-5))
         self.rmsnorm_eda = ZayaRMSNorm(self.mlp_expansion, eps=ln_eps)
         if self.use_eda:
             # eda
@@ -1052,6 +1056,7 @@ class MLP(nn.Module):
     """
 
     def __init__(self, config, ffn_hidden_size):
+
         super().__init__()
         self.config = config
 
@@ -1080,6 +1085,7 @@ class MLP(nn.Module):
         )
 
     def forward(self, hidden_states):
+
         # [s, b, 4 * h/p]
         if self.config.add_bias_linear:
             intermediate_parallel, bias_parallel = self.linear_fc1(hidden_states)
@@ -1125,6 +1131,7 @@ class SequentialMLP(nn.Module):
     """
 
     def __init__(self, num_local_experts: int, config, ffn_hidden_size: int):
+
         super().__init__()
         self.config = config
         self.add_bias = config.add_bias_linear
@@ -1177,6 +1184,7 @@ class ZayaBlock(nn.Module):
         layer_n: int,
         training: bool,
     ):
+
         super().__init__()
         self.debug_level = 3
         self.config = config
@@ -1262,6 +1270,7 @@ class ZayaDecoderMLPLayer(nn.Module):
         layer_n: int,
         training: bool,
     ):
+
         super().__init__()
         self.debug_level = 2
         self.config = config
@@ -1465,6 +1474,7 @@ class ZayaModel(ZayaPreTrainedModel):
     """
 
     def __init__(self, config: ZayaConfig):
+
         super().__init__(config)
         self.config = config
         self.padding_idx = config.pad_token_id
@@ -1473,15 +1483,16 @@ class ZayaModel(ZayaPreTrainedModel):
         self.embed_tokens = nn.Embedding(self.config.vocab_size, self.config.hidden_size, self.padding_idx)
         self.layers = []
         first_mlp_layer = True
+        self._tied_weights_keys = []
 
-        for layer_n in range(len(config.zaya_layers)):
-            if isinstance(config.zaya_layers[layer_n], int):
+        for layer_n in range(config.num_hidden_layers):
+            if layer_n % 2 == 1:
                 self.layers.append(
                     ZayaDecoderMLPLayer(
                         config,
-                        config.zaya_layers[layer_n],
-                        config.zaya_mlp_expansion[layer_n],
-                        config.ffn_hidden_size_list[layer_n],
+                        config.num_experts,
+                        config.zaya_mlp_expansion,
+                        config.ffn_hidden_size,
                         first_mlp_layer,
                         layer_n,
                         self.training,
@@ -1495,7 +1506,7 @@ class ZayaModel(ZayaPreTrainedModel):
         self.gradient_checkpointing = False
 
         if self.config.scale_residual_merge:
-            self.res_scale = ResidualScaling(config, len(config.zaya_layers))
+            self.res_scale = ResidualScaling(config, config.num_hidden_layers)
 
         self.final_norm = ZayaRMSNorm(self.config.hidden_size, eps=self.config.norm_epsilon)
         self.rotary_emb = ZayaRotaryEmbedding(config=config)
@@ -1520,6 +1531,7 @@ class ZayaModel(ZayaPreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[tuple, MoeModelOutputWithPast]:
+
         _, seq_length = input_ids.shape
 
         if attention_mask is not None:
@@ -1824,6 +1836,7 @@ class ZayaForCausalLM(ZayaPreTrainedModel, GenerationMixin):
         super().__init__(config, **kwargs)
         self.config = config
         self.model = ZayaModel(config)
+        self._tied_weights_keys = ["lm_head.weight", *self.model._tied_weights_keys]
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=self.config.lm_head_bias)
         if self.config.tie_word_embeddings:
@@ -1974,6 +1987,7 @@ class ZayaForCausalLM(ZayaPreTrainedModel, GenerationMixin):
         logits_to_keep=None,
         **kwargs,
     ):
+
         # Overwitten -- has a unique cache type, `ZayaDynamicCache`
         if past_key_values is not None and not isinstance(past_key_values, ZayaDynamicCache):
             raise ValueError(

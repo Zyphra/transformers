@@ -28,15 +28,16 @@ class ZayaConfig(PretrainedConfig):
     def __init__(
         self,
         cca=True,
-        cca_num_q_heads= [8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0, 8,0],
-        num_query_groups_list=[ 2, 0, 2, 0, 2, 0 ,2, 0, 2, 0, 2, 0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0, 2,0],
+        cca_num_q_heads=8,
+        num_query_groups=2,
         use_cache=True,
         attention_bias=False,
         lm_head_bias=False,
         vocab_size=262272,
         hidden_size=2048,
-        ffn_hidden_size_list=[0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096, 0, 4096],
-        num_hidden_layers=120,
+        ffn_hidden_size=4096,
+        num_hidden_layers=80,
+        num_experts=16,
         num_attention_heads=16,
         activation_func='swiglu',
         max_position_embeddings=4096,
@@ -48,9 +49,8 @@ class ZayaConfig(PretrainedConfig):
         rope_theta=10000,
         attention_dropout=0.0,
         moe_router_topk=1,
-        zaya_layers=['a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16, 'a', 16],
         normalization='RMSNorm',
-        zaya_mlp_expansion=[0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256, 0, 256],
+        zaya_mlp_expansion=256,
         zaya_use_mod=True,
         zaya_high_prec=True,
         zaya_use_eda=True,
@@ -71,14 +71,15 @@ class ZayaConfig(PretrainedConfig):
     ):
         self.cca = cca
         self.cca_num_q_heads = cca_num_q_heads
-        self.num_query_groups_list = num_query_groups_list
+        self.num_query_groups = num_query_groups
         self.use_cache = use_cache
         self.attention_bias = attention_bias
         self.lm_head_bias = lm_head_bias
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
-        self.ffn_hidden_size_list = ffn_hidden_size_list
+        self.ffn_hidden_size = ffn_hidden_size
         self.num_hidden_layers = num_hidden_layers
+        self.num_experts = num_experts
         self.num_attention_heads = num_attention_heads
         assert self.hidden_size % self.num_attention_heads == 0
         self.kv_channels = self.hidden_size // self.num_attention_heads
@@ -86,13 +87,13 @@ class ZayaConfig(PretrainedConfig):
         self.activation_func = activation_func
         self.max_position_embeddings = max_position_embeddings
         self.norm_epsilon = norm_epsilon
+        self.normalization = normalization
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
         self.tie_word_embeddings = tie_word_embeddings
         self.attention_dropout = attention_dropout
         self.moe_router_topk = moe_router_topk
-        self.zaya_layers = zaya_layers
         self.zaya_mlp_expansion = zaya_mlp_expansion
         self.zaya_use_mod = zaya_use_mod
         self.zaya_use_eda = zaya_use_eda
