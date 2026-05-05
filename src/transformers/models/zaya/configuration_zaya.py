@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 Zyphra and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 Zyphra and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,21 +16,11 @@
 """PyTorch Zaya model."""
 
 from ...configuration_utils import PretrainedConfig
-from ...modeling_rope_utils import rope_config_validation
 from ...utils import logging
 
 logger = logging.get_logger(__name__)
 
 class ZayaConfig(PretrainedConfig):
-
-    '''
-    >>> from transformers import CMoEModel, CMoEConfig
-    >>> configuration = CMoEConfig.from_pretrained("Zyphra/CMoE-16B")
-    >>> # Initializing a model from the configuration
-    >>> model = CMoEModel(configuration)
-    >>> # Accessing the model configuration
-    >>> configuration = model.config
-    '''
 
     model_type = "zaya"
     keys_to_ignore_at_inference = ["past_key_values"]
