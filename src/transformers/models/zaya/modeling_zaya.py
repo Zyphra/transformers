@@ -510,6 +510,8 @@ class ZayaAttention(nn.Module):
             cca_num_kv_heads=self.config.num_query_groups,
             cca_num_heads=self.num_heads,
             hidden_size=self.hidden_size,
+            cca_time0=self.config.cca_time0,
+            cca_time1=self.config.cca_time1,
             layer_number=layer_n,
         )
 

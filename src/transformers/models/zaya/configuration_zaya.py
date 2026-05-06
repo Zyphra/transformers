@@ -66,6 +66,9 @@ class ZayaConfig(PretrainedConfig):
         rope_scaling=None,
         partial_rotary_factor=0.5,
         num_key_value_heads=2,
+        clamp_temp=False,
+        cca_time0=2,
+        cca_time1=2,
         _attn_implementation="eager",
         **kwargs,
     ):
@@ -108,6 +111,9 @@ class ZayaConfig(PretrainedConfig):
         self.partial_rotary_factor = partial_rotary_factor
         self.rope_theta = rope_theta
         self.num_key_value_heads = num_key_value_heads
+        self.clamp_temp = clamp_temp
+        self.cca_time0=cca_time0
+        self.cca_time1=cca_time1
         self._attn_implementation = _attn_implementation
 
         super().__init__(
