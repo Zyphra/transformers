@@ -47,7 +47,6 @@ class ZayaConfig(PretrainedConfig):
         eos_token_id=1,
         tie_word_embeddings=True,
         rope_theta=10000,
-        swa_rotary_base=10000,
         attention_dropout=0.0,
         moe_router_topk=1,
         normalization='RMSNorm',
@@ -67,11 +66,18 @@ class ZayaConfig(PretrainedConfig):
         rope_scaling=None,
         partial_rotary_factor=0.5,
         num_key_value_heads=2,
+        clamp_temp=False,
+        cca_time0=2,
+        cca_time1=2,
         swa_layers=None,
+        swa_rotary_base=None,
+        _attn_implementation="eager",
         **kwargs,
     ):
         self.cca = cca
         self.cca_num_q_heads = cca_num_q_heads
+        self.cca_time0=cca_time0
+        self.cca_time1=cca_time1
         self.num_query_groups = num_query_groups
         self.use_cache = use_cache
         self.attention_bias = attention_bias
@@ -108,9 +114,13 @@ class ZayaConfig(PretrainedConfig):
         self.rope_scaling = rope_scaling
         self.partial_rotary_factor = partial_rotary_factor
         self.rope_theta = rope_theta
-        self.swa_rotary_base = swa_rotary_base
-        self.swa_layers = swa_layers
         self.num_key_value_heads = num_key_value_heads
+        self.clamp_temp = clamp_temp
+        self.cca_time0 = cca_time0
+        self.cca_time1 = cca_time1
+        self.swa_layers = swa_layers
+        self.swa_rotary_base = swa_rotary_base
+        self._attn_implementation = _attn_implementation
 
         super().__init__(
             pad_token_id=pad_token_id,

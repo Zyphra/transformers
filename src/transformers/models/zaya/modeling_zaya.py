@@ -511,6 +511,8 @@ class ZayaAttention(nn.Module):
             cca_num_kv_heads=self.config.num_query_groups,
             cca_num_heads=self.num_heads,
             hidden_size=self.hidden_size,
+            cca_time0=self.config.cca_time0,
+            cca_time1=self.config.cca_time1,
             layer_number=layer_n,
         )
 
@@ -530,7 +532,6 @@ class ZayaAttention(nn.Module):
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
         window_size: int = 0,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
-
         batch_size, seq_length, _ = hidden_states.shape
         query_states, key_states, value_states = self.qkv(hidden_states, past_key_values, cca_mask)
         query_states = query_states.view(batch_size, seq_length, self.config.num_attention_heads // 2, self.head_dim)
@@ -554,7 +555,14 @@ class ZayaAttention(nn.Module):
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
-        if attention_mask is not None:  # no matter the length, we just slice it
+        if window_size > 0:
+            causal_mask = (
+                torch.ones((seq_length, seq_length), dtype=torch.bool, device=query_states.device)
+                .tril_(diagonal=0)
+                .triu_(diagonal=-window_size)
+            )
+            attn_weights.masked_fill_(~causal_mask, -1e4)
+        elif attention_mask is not None:  # no matter the length, we just slice it
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
 
@@ -605,7 +613,6 @@ class ZayaSdpaAttention(ZayaAttention):
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
         window_size: int = 0,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
-
         if output_attentions:
             # TODO: Improve this warning with e.g.
             # `model.config.attn_implementation = "manual"` once this is
@@ -664,6 +671,14 @@ class ZayaSdpaAttention(ZayaAttention):
         # AttentionMaskConverter.to_causal_4d that does not create a causal
         # mask in case q_len == 1.
         is_causal = True if causal_mask is None and seq_length > 1 else False
+        if window_size > 0:
+            causal_mask = (
+                torch.ones((seq_length, seq_length), dtype=torch.bool, device=query_states.device)
+                .tril_(diagonal=0)
+                .triu_(diagonal=-window_size)
+                .unsqueeze(0)
+            )
+            is_causal = False
 
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
@@ -701,7 +716,6 @@ class ZayaFlashAttention2(ZayaAttention):
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
         window_size: int = 0,
     ):
-
         if output_attentions:
             # TODO: Improve this warning with e.g.
             # `model.config.attn_implementation = "manual"` once this is
@@ -801,6 +815,7 @@ class ZayaDecoderATTLayer(nn.Module):
         self.layer_n = layer_n
         self.training = self.training
         self.window_size = 0 if self.config.swa_layers is None else self.config.swa_layers[layer_n]
+        config._attn_implementation = "sdpa"  #'flash_attention_2'
         self.self_attn = Zaya_ATTENTION_CLASSES[config._attn_implementation](config, layer_n)
 
         self.input_norm = ZayaRMSNorm(self.config.hidden_size, eps=self.config.norm_epsilon)
@@ -1254,7 +1269,7 @@ class ZayaBlock(nn.Module):
 
         expert_output = expert_output[original_order]
         expert_output = expert_output.view(batch_size, seq_length, emb_dim)
-        # print(probs.shape,expert_output.shape)
+
         probs = probs.view(batch_size, seq_length)
         expert_output = expert_output * probs.unsqueeze(-1)
 
