@@ -237,7 +237,7 @@ class ZayaDynamicCache(DynamicCache):
         self.dtype = dtype
         self.device = device
         num_k_heads = config.num_query_groups
-        num_q_heads = config.cca_num_q_heads
+        num_q_heads = config.num_attention_heads
         head_dim = 128
         self.conv_kernel_size = 2
         self.num_layers = config.num_hidden_layers
@@ -289,8 +289,8 @@ class CCA(nn.Module):
         config: ZayaConfig,
         cca_num_kv_heads: int = 2,
         cca_num_q_heads: int = 8,
-        cca_num_heads: int = 16,
         hidden_size: Optional[int] = None,
+        head_dim: int = 128,
         cca_time0: int = 2,
         cca_time1: int = 2,
         layer_number: int = 0,
@@ -311,17 +311,16 @@ class CCA(nn.Module):
 
         self.num_kv_heads = int(cca_num_kv_heads)
         self.num_q_heads = int(cca_num_q_heads)
-        self.num_heads = int(cca_num_heads)
 
         # Geometry
-        self.head_dim = self.hidden_size // self.num_heads
+        self.head_dim = int(head_dim)
         self.latent_k_dim = self.num_kv_heads * self.head_dim
         self.latent_q_dim = self.num_q_heads * self.head_dim
-        self.sqrt_head_dim = float(np.sqrt(self.head_dim))
+        self.sqrt_head_dim = np.sqrt(self.head_dim)
         self.gqa_groups = self.num_q_heads // self.num_kv_heads
-        assert (
-            self.num_q_heads % self.num_kv_heads == 0
-        ), "q_heads must be a multiple of k_heads"
+        assert self.num_q_heads % self.num_kv_heads == 0, (
+            "q_heads must be a multiple of k_heads"
+        )
         assert (self.latent_k_dim + self.latent_q_dim) == (
             self.num_kv_heads + self.num_q_heads
         ) * self.head_dim
@@ -529,29 +528,24 @@ class ZayaAttention(nn.Module):
         self.config = config
         self.layer_n = layer_n
         self.hidden_size = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.head_dim = self.hidden_size // self.num_heads
+        self.cca_num_q_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.num_key_value_groups = self.cca_num_q_heads // self.num_key_value_heads
         self.is_causal = True
         self.attention_dropout = config.attention_dropout
-
-        if (self.head_dim * self.num_heads) != self.hidden_size:
-            raise ValueError(
-                f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
-                f" and `num_heads`: {self.num_heads}).")
+        self.head_dim = config.head_dim
 
         self.o_proj = nn.Linear(
-            (self.num_heads // 2) * self.head_dim,
+            self.cca_num_q_heads * self.head_dim,
             self.hidden_size,
             bias=self.config.attention_bias,
         )  # hardcoded query compression for now
         self.qkv = CCA(
             config=self.config,
-            cca_num_q_heads=self.config.cca_num_q_heads,
+            cca_num_q_heads=self.config.num_attention_heads,
             cca_num_kv_heads=self.config.num_query_groups,
-            cca_num_heads=self.num_heads,
             hidden_size=self.hidden_size,
+            head_dim=self.config.head_dim,
             cca_time0=self.config.cca_time0,
             cca_time1=self.config.cca_time1,
             layer_number=layer_n,
@@ -559,7 +553,7 @@ class ZayaAttention(nn.Module):
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return (
-            tensor.view(bsz, seq_len, self.num_heads, self.head_dim)
+            tensor.view(bsz, seq_len, self.cca_num_q_heads, self.head_dim)
             .transpose(1, 2)
             .contiguous()
         )
@@ -584,7 +578,7 @@ class ZayaAttention(nn.Module):
         query_states = query_states.view(
             batch_size,
             seq_length,
-            self.config.num_attention_heads // 2,
+            self.config.num_attention_heads,
             self.head_dim)
         key_states = key_states.view(
             batch_size,
@@ -616,8 +610,8 @@ class ZayaAttention(nn.Module):
             )
 
         # repeat k/v heads if n_kv_heads < n_heads
-        key_states = repeat_kv(key_states, self.num_key_value_groups // 2)
-        value_states = repeat_kv(value_states, self.num_key_value_groups // 2)
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         attn_weights = torch.matmul(
             query_states, key_states.transpose(2, 3)
@@ -646,17 +640,17 @@ class ZayaAttention(nn.Module):
 
         if attn_output.size() != (
             batch_size,
-            self.num_heads // 2,
+            self.cca_num_q_heads,
             seq_length,
             self.head_dim,
         ):
             raise ValueError(
-                f"`attn_output` should be of size {(batch_size, self.num_heads, seq_length, self.head_dim)}, but is"
+                f"`attn_output` should be of size {(batch_size, self.cca_num_q_heads, seq_length, self.head_dim)}, but is"
                 f" {attn_output.size()}")
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(
-            batch_size, seq_length, self.hidden_size // 2)
+            batch_size, seq_length, self.cca_num_q_heads * self.head_dim)
         attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
@@ -713,7 +707,7 @@ class ZayaSdpaAttention(ZayaAttention):
         query_states = query_states.view(
             batch_size,
             seq_length,
-            self.config.num_attention_heads // 2,
+            self.config.num_attention_heads,
             self.head_dim)
         key_states = key_states.view(
             batch_size,
@@ -745,8 +739,8 @@ class ZayaSdpaAttention(ZayaAttention):
             )
 
         # repeat k/v heads if n_kv_heads < n_heads
-        key_states = repeat_kv(key_states, self.num_key_value_groups // 2)
-        value_states = repeat_kv(value_states, self.num_key_value_groups // 2)
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         causal_mask = attention_mask
         if attention_mask is not None:  # no matter the length, we just slice it
@@ -837,7 +831,7 @@ class ZayaFlashAttention2(ZayaAttention):
         query_states = query_states.view(
             batch_size,
             seq_length,
-            self.config.num_attention_heads // 2,
+            self.config.num_attention_heads,
             self.head_dim)
         key_states = key_states.view(
             batch_size,
@@ -2172,16 +2166,6 @@ class ZayaForCausalLM(ZayaPreTrainedModel, GenerationMixin):
         "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
         ```"""
 
-        if (
-            use_cache
-            and self.config.rope_scaling
-            and cache_position is not None
-            and cache_position[0]
-            == self.config.rope_scaling["original_max_position_embeddings"]
-        ):
-            logger.warning(
-                f"If you are not using the generate method, you may encounter nonsensical outputs after the {self.config.rope_scaling['original_max_position_embeddings']}th token, as the KV cache needs to be recomputed."
-            )
         output_attentions = (
             output_attentions
             if output_attentions is not None
