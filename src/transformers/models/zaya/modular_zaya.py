@@ -18,6 +18,7 @@ import torch
 
 """PyTorch Zaya model."""
 
+import copy
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -574,8 +575,8 @@ class ZayaAttention(nn.Module):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        window_size: int = 0,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-
         batch_size, seq_length, _ = hidden_states.shape
         query_states, key_states, value_states = self.qkv(
             hidden_states, past_key_values, cca_mask
@@ -622,9 +623,17 @@ class ZayaAttention(nn.Module):
             query_states, key_states.transpose(2, 3)
         ) / math.sqrt(self.head_dim)
 
-        if attention_mask is not None:  # no matter the length, we just slice it
+        if window_size > 0:
+            causal_mask = torch.ones(
+                (seq_length, seq_length), 
+                dtype=torch.bool, 
+                device=query_states.device
+            ).tril_(diagonal=0).triu_(diagonal=-window_size)
+            attn_weights.masked_fill_(~causal_mask, -1e4)
+        elif attention_mask is not None:  # no matter the length, we just slice it
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
+            
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(
@@ -675,8 +684,8 @@ class ZayaSdpaAttention(ZayaAttention):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        window_size: int = 0,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-
         if output_attentions:
 
             # TODO: Improve this warning with e.g.
@@ -756,6 +765,13 @@ class ZayaSdpaAttention(ZayaAttention):
         # AttentionMaskConverter.to_causal_4d that does not create a causal
         # mask in case q_len == 1.
         is_causal = True if causal_mask is None and seq_length > 1 else False
+        if window_size > 0:
+            causal_mask = torch.ones(
+                (seq_length, seq_length), 
+                dtype=torch.bool, 
+                device=query_states.device
+            ).tril_(diagonal=0).triu_(diagonal=-window_size).unsqueeze(0)
+            is_causal = False
 
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
@@ -792,8 +808,8 @@ class ZayaFlashAttention2(ZayaAttention):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        window_size: int = 0,
     ):
-
         if output_attentions:
 
             # TODO: Improve this warning with e.g.
@@ -888,7 +904,7 @@ class ZayaFlashAttention2(ZayaAttention):
             seq_length,
             position_ids=position_ids,
             dropout=self.attention_dropout if self.training else 0.0,
-            sliding_window=getattr(self.config, "sliding_window", None),
+            sliding_window=window_size,
             is_causal=self.is_causal,
         )
 
@@ -914,6 +930,7 @@ class ZayaDecoderATTLayer(nn.Module):
         self.config = config
         self.layer_n = layer_n
         self.training = self.training
+        self.window_size = 0 if self.config.swa_layers is None else self.config.swa_layers[layer_n]
         self.self_attn = Zaya_ATTENTION_CLASSES[config._attn_implementation](
             config, layer_n
         )
@@ -990,6 +1007,7 @@ class ZayaDecoderATTLayer(nn.Module):
             use_cache=use_cache,
             cache_position=cache_position,
             position_embeddings=position_embeddings,
+            window_size=self.window_size
         )
 
         outputs = (hidden_states,)
@@ -1411,7 +1429,7 @@ class ZayaBlock(nn.Module):
 
         expert_output = expert_output[original_order]
         expert_output = expert_output.view(batch_size, seq_length, emb_dim)
-        # print(probs.shape,expert_output.shape)
+
         probs = probs.view(batch_size, seq_length)
         expert_output = expert_output * probs.unsqueeze(-1)
 
@@ -1688,7 +1706,13 @@ class ZayaModel(ZayaPreTrainedModel):
         self.final_norm = ZayaRMSNorm(
             self.config.hidden_size, eps=self.config.norm_epsilon
         )
+        
         self.rotary_emb = ZayaRotaryEmbedding(config=config)
+        if self.config.swa_layers is not None:
+            swa_config = copy.deepcopy(config)
+            swa_config.rope_theta = swa_config.swa_rotary_base
+            self.swa_rotary_emb = ZayaRotaryEmbedding(config=swa_config)
+        
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1775,13 +1799,22 @@ class ZayaModel(ZayaPreTrainedModel):
         )
 
         hidden_states = inputs_embeds
+
+        
+
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        if self.config.swa_layers is not None:
+            swa_position_embeddings = self.swa_rotary_emb(hidden_states, position_ids)
+
 
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
         prev_router_hidden_states = None
 
         for layer_n, decoder_layer in enumerate(self.layers):
+            emb_to_use = position_embeddings
+            if self.config.swa_layers is not None:
+                emb_to_use = position_embeddings if self.config.swa_layers[layer_n] == 0 else swa_position_embeddings
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -1797,7 +1830,7 @@ class ZayaModel(ZayaPreTrainedModel):
                         output_attentions,
                         use_cache,
                         cache_position,
-                        position_embeddings,
+                        emb_to_use,
                         prev_router_hidden_states,
                         cca_mask,
                     )
@@ -1812,7 +1845,7 @@ class ZayaModel(ZayaPreTrainedModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
-                    position_embeddings=position_embeddings,
+                    position_embeddings=emb_to_use,
                     prev_router_hidden_states=prev_router_hidden_states,
                     cca_mask=cca_mask,
                 )
