@@ -872,12 +872,13 @@ class CCA(nn.Module):
             v1 = v1 + addon_v * mask
 
         v2 = self.val_proj2(hs_d)  # [S, B, latent_k_dim/2]
-        value = (
-            torch.cat([v1, v2], dim=-1).contiguous().view(*hs.shape[:2], self.num_kv_heads, self.head_dim)
-        )  # [S, B, kh, dh]
         if self.config.vision_lora and image_mask is not None:
             addon_v = self.lora_val_proj2(hs_d)
             v2 = v2 + addon_v * mask
+
+        value = (
+            torch.cat([v1, v2], dim=-1).contiguous().view(*hs.shape[:2], self.num_kv_heads, self.head_dim)
+        )  # [S, B, kh, dh]
 
         # L2-normalize per head, then scale
         query_norm = query.norm(p=2, dim=-1, keepdim=True)

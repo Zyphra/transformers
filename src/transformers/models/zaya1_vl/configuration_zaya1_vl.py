@@ -155,6 +155,8 @@ class Zaya1VLConfig(PretrainedConfig):
         self.activation_func_fp8_input_store = activation_func_fp8_input_store
         self.sliding_window = sliding_window
         self.partial_rotary_factor = partial_rotary_factor
+        if "rotary_base" in kwargs:
+            rope_theta = kwargs.pop("rotary_base")
         self.rope_theta = rope_theta
         if isinstance(rope_parameters, dict):
             rope_parameters = dict(rope_parameters)
