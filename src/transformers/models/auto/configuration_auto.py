@@ -456,6 +456,7 @@ CONFIG_MAPPING_NAMES = OrderedDict[str, str](
         ("yoso", "YosoConfig"),
         ("zamba", "ZambaConfig"),
         ("zamba2", "Zamba2Config"),
+        ("zaya1_vl", "Zaya1VLConfig"),
         ("zoedepth", "ZoeDepthConfig"),
     ]
 )
@@ -919,6 +920,7 @@ MODEL_NAMES_MAPPING = OrderedDict[str, str](
         ("yoso", "YOSO"),
         ("zamba", "Zamba"),
         ("zamba2", "Zamba2"),
+        ("zaya1_vl", "Zaya1VL"),
         ("zoedepth", "ZoeDepth"),
     ]
 )
