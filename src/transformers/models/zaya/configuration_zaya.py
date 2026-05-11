@@ -61,6 +61,7 @@ class ZayaConfig(PretrainedConfig):
         apply_rope_fusion=True,
         bias_activation_fusion=True,
         activation_func_fp8_input_store=False,
+        router_aux_loss_coef=0.001,
         sliding_window=None,
         rope_scaling=None,
         rope_parameters=None,
@@ -109,6 +110,7 @@ class ZayaConfig(PretrainedConfig):
         self.residual_in_fp32 = residual_in_fp32
         self.bias_activation_fusion = bias_activation_fusion
         self.activation_func_fp8_input_store = activation_func_fp8_input_store
+        self.router_aux_loss_coef = router_aux_loss_coef
         self.sliding_window = sliding_window
         self.partial_rotary_factor = partial_rotary_factor
         self.rope_theta = rope_theta

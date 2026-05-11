@@ -56,6 +56,7 @@ from ...utils import (
 )
 from ...utils.deprecation import deprecate_kwarg
 from ...utils.import_utils import is_torch_fx_available
+from ...integrations import use_kernel_forward_from_hub, use_kernel_func_from_hub
 from .configuration_zaya import ZayaConfig
 
 if is_flash_attn_2_available():
@@ -183,6 +184,7 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 
+@use_kernel_func_from_hub("rotary_pos_emb")
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     """
     Applies Rotary Position Embedding to the query and key tensors. This version
@@ -215,6 +217,7 @@ class ZayaRotaryEmbedding(Glm4RotaryEmbedding):
     pass
 
 
+@use_kernel_forward_from_hub("RMSNorm")
 class ZayaRMSNorm(LlamaRMSNorm):
     pass
 
@@ -916,7 +919,7 @@ Zaya_ATTENTION_CLASSES = {
 }
 
 
-class ZayaDecoderATTLayer(nn.Module):
+class ZayaDecoderATTLayer(GradientCheckpointingLayer):
     def __init__(self, config: ZayaConfig, layer_n: int, training: bool):
 
         super().__init__()
@@ -1568,15 +1571,18 @@ class ZayaPreTrainedModel(PreTrainedModel):
     config_class = ZayaConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["ZayaDecoderLayer"]
+    _no_split_modules = ["ZayaDecoderATTLayer"]
     _skip_keys_device_placement = ["past_key_values"]
     _supports_flash_attn_2 = True
     _supports_sdpa = True
+    _supports_flex_attn = True
     _supports_cache_class = True
     _supports_quantized_cache = False
-    # MoE models don't work with torch.compile (`torch.where(condition)` not
-    # supported)
     _supports_static_cache = False
+    _can_record_outputs = {
+        "hidden_states": ZayaDecoderATTLayer,
+        "attentions": ZayaAttention,
+    }
 
 
 Zaya_INPUTS_DOCSTRING = r"""
@@ -2073,6 +2079,9 @@ class ZayaModel(ZayaPreTrainedModel):
 
 
 class ZayaForCausalLM(ZayaPreTrainedModel, GenerationMixin):
+    _tp_plan = {"lm_head": "colwise_gather_output"}
+    _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
+
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
         self.config = config
