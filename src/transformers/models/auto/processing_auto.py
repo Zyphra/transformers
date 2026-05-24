@@ -130,6 +130,7 @@ PROCESSOR_MAPPING_NAMES = OrderedDict(
         ("wavlm", "Wav2Vec2Processor"),
         ("whisper", "WhisperProcessor"),
         ("xclip", "XCLIPProcessor"),
+        ("zamba2_vl", "Zamba2_VLProcessor"),
     ]
 )
 

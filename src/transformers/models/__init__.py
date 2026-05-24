@@ -332,6 +332,7 @@ if TYPE_CHECKING:
     from .yoso import *
     from .zamba import *
     from .zamba2 import *
+    from .zamba2_vl import *
     from .zoedepth import *
 else:
     import sys
